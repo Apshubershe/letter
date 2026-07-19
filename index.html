@@ -17,6 +17,7 @@
     --accent: #5B6B72;      /* приглушённый сине-серый, не романтический */
     --accent-soft: #DCE2E1;
     --focus-glow: rgba(91,107,114,0.18);
+    --ok: #6E8266;
   }
   *{ box-sizing: border-box; }
   html,body{ margin:0; padding:0; }
@@ -67,6 +68,10 @@
   @keyframes fadeUp{
     from{ opacity:0; transform: translateY(8px); }
     to{ opacity:1; transform: translateY(0); }
+  }
+  @keyframes fadeIn{
+    from{ opacity:0; }
+    to{ opacity:1; }
   }
   .section{
     margin-bottom: 44px;
@@ -127,8 +132,13 @@
     flex-direction: column;
     gap: 14px;
   }
+  .actions-row{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
   button.save{
-    align-self: flex-start;
     background: var(--ink);
     color: var(--paper-soft);
     border: none;
@@ -143,6 +153,24 @@
   button.save:hover{ background: var(--accent); }
   button.save:active{ transform: scale(0.98); }
   button.save:disabled{ opacity: 0.5; cursor: default; }
+
+  .save-status{
+    font-size: 13px;
+    color: var(--ink-soft);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .save-status.ok{ color: var(--ok); }
+  .save-status.err{ color: #A24B3F; }
+
+  .draft-note{
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin: -34px 0 44px;
+    opacity: 0;
+    animation: fadeIn 0.6s ease forwards;
+  }
 
   .note{
     font-size: 13.5px;
@@ -169,6 +197,22 @@
     line-height: 1.6;
     color: var(--ink);
     max-width: 480px;
+    margin: 0 0 32px;
+  }
+  .confirm button.again{
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 12px 22px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+  }
+  .confirm button.again:hover{
+    border-color: var(--accent);
+    background: var(--paper-soft);
   }
 
   .lock-screen{
@@ -235,7 +279,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCOjsXzRzzGw9C3xIzelukf2eQI9N8iMrA",
@@ -254,6 +298,7 @@ const db = getFirestore(fbApp);
 const READ_PASSPHRASE = "полынь72";
 const DOC_ID = "f89f8c5e3cdb496e9b88df8cc3eebde8";
 const docRef = doc(db, "letters", DOC_ID);
+const DRAFT_KEY = "letter_draft_" + DOC_ID; // черновик хранится только в этом браузере
 
 const QUESTIONS = [
   { id: "Что тебя ранит в моих действиях?", label: "Что тебя ранит в моих действиях?" },
@@ -261,6 +306,7 @@ const QUESTIONS = [
   { id: "комфортно и в безопасности рядом со мной?", label: "Когда и как ты чувствуешь себя комфортно и в безопасности рядом со мной?" },
 ];
 const OPTIONAL_QUESTION = { id: "Что ты любишь в наших отношениях и что бы хотела получать от меня?", label: "Что ты любишь в наших отношениях и что бы хотела получать от меня?" };
+const ALL_QUESTIONS = [...QUESTIONS, OPTIONAL_QUESTION];
 
 const app = document.getElementById('app');
 
@@ -269,7 +315,39 @@ function fmtDate(iso){
   return d.toLocaleString('ru-RU', { day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' });
 }
 
+/* ------------------------------------------------------------------
+   ЧЕРНОВИК: сохраняем набранный текст в localStorage по мере ввода,
+   чтобы ничего не потерялось при случайном закрытии вкладки или
+   потере связи. Черновик живёт только в этом браузере, не в Firestore.
+   ------------------------------------------------------------------ */
+function loadDraft(){
+  try{
+    const raw = localStorage.getItem(DRAFT_KEY);
+    return raw ? JSON.parse(raw) : {};
+  }catch(e){ return {}; }
+}
+function saveDraft(values){
+  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(values)); }
+  catch(e){ /* localStorage недоступен — просто не сохраняем черновик */ }
+}
+function clearDraft(){
+  try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
+}
+
+let draftTimer = null;
+function scheduleDraftSave(){
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    const values = {};
+    document.querySelectorAll('textarea[data-id]').forEach(t => { values[t.dataset.id] = t.value; });
+    saveDraft(values);
+  }, 400);
+}
+
 function renderForm(){
+  const draft = loadDraft();
+  const hasDraft = Object.values(draft).some(v => (v || '').trim().length > 0);
+
   app.innerHTML = `
     <div class="wrap">
       <div id="formView">
@@ -280,17 +358,22 @@ function renderForm(){
         <br><br>
         <span style="font-size:16px; color:var(--ink-soft);">Не обязательно отвечать на всё сразу. Можно зайти в любой день и написать хоть про одну тему — этого достаточно.</span></p>
 
+        ${hasDraft ? `<p class="draft-note">Мы сохранили то, что ты начинала писать в прошлый раз — можешь продолжить.</p>` : ``}
+
         <div id="questions"></div>
 
         <hr class="divider" />
 
         <div class="section">
           <p class="question">${OPTIONAL_QUESTION.label}</p>
-          <textarea data-id="${OPTIONAL_QUESTION.id}" placeholder="Я хочу знать"></textarea>
+          <textarea data-id="${OPTIONAL_QUESTION.id}" placeholder="Я хочу знать">${escapeVal(draft[OPTIONAL_QUESTION.id])}</textarea>
         </div>
 
         <div class="actions">
-          <button class="save" id="saveBtn">Сохранить</button>
+          <div class="actions-row">
+            <button class="save" id="saveBtn">Сохранить</button>
+            <span class="save-status" id="saveStatus"></span>
+          </div>
           <p class="note">Я просто прочитаю то, что ты напишешь —
           не для того, чтобы сразу ответить или объяснить, а чтобы услышать.</p>
         </div>
@@ -300,6 +383,7 @@ function renderForm(){
         <h2>Сохранено.</h2>
         <p>Спасибо, что написала это. Можешь вернуться сюда и дописать в любой момент —
         ничего не потеряется.</p>
+        <button class="again" id="againBtn">Написать ещё</button>
       </div>
     </div>
   `;
@@ -310,18 +394,32 @@ function renderForm(){
     div.className = 'section';
     div.innerHTML = `
       <p class="question">${q.label}</p>
-      <textarea data-id="${q.id}" placeholder="Пиши как есть"></textarea>
+      <textarea data-id="${q.id}" placeholder="Пиши как есть">${escapeVal(draft[q.id])}</textarea>
     `;
     qWrap.appendChild(div);
   });
 
+  // Автосохранение черновика при вводе — не ждём нажатия "Сохранить"
+  document.querySelectorAll('textarea[data-id]').forEach(t => {
+    t.addEventListener('input', scheduleDraftSave);
+  });
+
   document.getElementById('saveBtn').addEventListener('click', onSave);
+  document.getElementById('againBtn').addEventListener('click', renderForm);
+}
+
+// textarea не эскейпит содержимое сама по себе при вставке через innerHTML — экранируем на всякий случай
+function escapeVal(v){
+  return (v || '').replace(/</g, '&lt;');
 }
 
 async function onSave(){
   const btn = document.getElementById('saveBtn');
+  const status = document.getElementById('saveStatus');
   btn.disabled = true;
   btn.textContent = "Сохраняю…";
+  status.textContent = "";
+  status.className = "save-status";
 
   const answers = {};
   document.querySelectorAll('textarea[data-id]').forEach(t => {
@@ -332,6 +430,8 @@ async function onSave(){
   if(!hasAnyContent){
     btn.disabled = false;
     btn.textContent = "Сохранить";
+    status.textContent = "Напиши хоть что-нибудь, чтобы сохранить";
+    status.className = "save-status err";
     return;
   }
 
@@ -342,21 +442,19 @@ async function onSave(){
   };
 
   try{
-    let existing = [];
-    try{
-      const snap = await getDoc(docRef);
-      if(snap.exists() && Array.isArray(snap.data().entries)) existing = snap.data().entries;
-    }catch(e){ existing = []; }
+    // Атомарная запись: arrayUnion добавляет запись на сервере без чтения
+    // всего документа заранее, поэтому одновременные сохранения
+    // из разных вкладок не перетирают друг друга и не теряются.
+    await setDoc(docRef, { entries: arrayUnion(entry) }, { merge: true });
 
-    existing.push(entry);
-    await setDoc(docRef, { entries: existing });
-
+    clearDraft();
     document.getElementById('formView').style.display = 'none';
     document.getElementById('confirmView').style.display = 'block';
   }catch(e){
     btn.disabled = false;
     btn.textContent = "Сохранить";
-    alert("Не получилось сохранить. Попробуй ещё раз через минуту.");
+    status.textContent = "Не получилось сохранить. Черновик остался у тебя — попробуй ещё раз через минуту.";
+    status.className = "save-status err";
   }
 }
 
@@ -396,20 +494,25 @@ async function renderEntries(){
   if(entries.length === 0){
     wrap.innerHTML = `<p class="empty-state">Она ещё ничего не сохранила.</p>`;
   } else {
-    entries.slice().reverse().forEach(entry => {
-      const el = document.createElement('div');
-      el.className = 'entry';
-      let html = `<div class="entry-date">${fmtDate(entry.timestamp)}</div>`;
-      [...QUESTIONS, OPTIONAL_QUESTION].forEach(q => {
-        const val = (entry.answers && entry.answers[q.id]) ? entry.answers[q.id] : '';
-        html += `<div class="q">${q.label}</div>`;
-        html += val
-          ? `<div class="a">${val.replace(/</g,'&lt;')}</div>`
-          : `<div class="a empty">не заполнено</div>`;
+    // Новые записи сверху — сортируем по времени на случай, если
+    // параллельные сохранения из разных вкладок легли не по порядку.
+    entries
+      .slice()
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .forEach(entry => {
+        const el = document.createElement('div');
+        el.className = 'entry';
+        let html = `<div class="entry-date">${fmtDate(entry.timestamp)}</div>`;
+        ALL_QUESTIONS.forEach(q => {
+          const val = (entry.answers && entry.answers[q.id]) ? entry.answers[q.id] : '';
+          html += `<div class="q">${q.label}</div>`;
+          html += val
+            ? `<div class="a">${val.replace(/</g,'&lt;')}</div>`
+            : `<div class="a empty">не заполнено</div>`;
+        });
+        el.innerHTML = html;
+        wrap.appendChild(el);
       });
-      el.innerHTML = html;
-      wrap.appendChild(el);
-    });
   }
   app.appendChild(wrap);
 }
