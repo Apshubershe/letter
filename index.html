@@ -273,12 +273,12 @@ function renderForm(){
   app.innerHTML = `
     <div class="wrap">
       <div id="formView">
-        <p class="eyebrow">без спешки, без правильных ответов</p>
+        <p class="eyebrow">без спешки, тут нет неправильных ответов</p>
         <h1>Я хочу понять тебя.</h1>
-        <p class="intro">Я не жду, что ты меня сейчас простишь. Я понял, что не услышал тебя тогда.
+        <p class="intro">Я не жду, что ты меня сейчас простишь. Я хочу стать лучшим для тебя.
         Если ты когда-нибудь захочешь — я хочу понять тебя лучше.
         <br><br>
-        <span style="font-size:16px; color:var(--ink-soft);">Не обязательно отвечать на всё сразу и не обязательно отвечать на всё вообще. Можно зайти в любой день и написать хоть про одну тему — этого достаточно.</span></p>
+        <span style="font-size:16px; color:var(--ink-soft);">Не обязательно отвечать на всё сразу. Можно зайти в любой день и написать хоть про одну тему — этого достаточно.</span></p>
 
         <div id="questions"></div>
 
@@ -286,7 +286,7 @@ function renderForm(){
 
         <div class="section">
           <p class="question">${OPTIONAL_QUESTION.label}</p>
-          <textarea data-id="${OPTIONAL_QUESTION.id}" placeholder="Можно оставить пустым"></textarea>
+          <textarea data-id="${OPTIONAL_QUESTION.id}" placeholder="Я хочу знать"></textarea>
         </div>
 
         <div class="actions">
